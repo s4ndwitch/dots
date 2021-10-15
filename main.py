@@ -20,13 +20,15 @@ class Game(object):
 		self.size = size  # Количество клеток
 		self.cell_color = pygame.Color((5, 4, 170))  # Цвет клеток (королевский синий)
 		self.screen_color = pygame.Color("white")  # Цвет фона
-		self.dot_color_1 = pygame.Color("red")  # Цвет точки одного игрока
-		self.dot_color_2 = pygame.Color("blue")  # Цвет точки другого игрока
+		self.dot_color_1 = pygame.Color((255, 0, 0, 182))  # Цвет точки одного игрока
+		self.dot_color_2 = pygame.Color((0, 0, 255, 182))  # Цвет точки другого игрока
+		self.rect_color_1 = pygame.Color((255, 0, 0, 91))  # Цвета прямоугольников из точек
+		self.rect_color_2 = pygame.Color((0, 0, 255, 91))
 		self.field = [[None for _ in range(size[0])] for _ in range(size[1])]  # Клеточное поле, собственно
 		self.move = FIRST
 
-	def draw(self):
-		"""Перерисовка всех pygame объектов; клетки"""
+	def draw_cells(self):
+		"""Перерисовка клеток"""
 		for i in range(0, self.size[0]):
 			pygame.draw.line(
 				self.surface, self.cell_color, [i * self.scale, 0], [i * self.scale, self.size[1] * self.scale])
@@ -34,10 +36,12 @@ class Game(object):
 			pygame.draw.line(
 				self.surface, self.cell_color, [0, i * self.scale], [self.size[0] * self.scale, i * self.scale])
 
+	def draw_dots(self):
+		"""Перерисовка точек"""
 		for i in range(len(self.field)):
 			for j in range(len(self.field[0])):
 				if self.field[i][j]:
-					self.field[i][j].draw(self.surface)
+					self.surface.blit(self.field[i][j].draw(self.surface), (0, 0))
 
 	def handle_mouse_click(self, x: int, y: int):
 		"""Обработка нажатия на кнопку мыши: преобразуются координаты, заполняется игровое поле"""
@@ -65,8 +69,6 @@ class Game(object):
 		"""Соответственно, обработчик событий"""
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT:
-				from pprint import pprint
-				pprint(self.field)
 				pygame.quit()
 				sys.exit()
 			elif event.type == pygame.MOUSEBUTTONDOWN:
@@ -75,10 +77,11 @@ class Game(object):
 	def run(self):
 		"""Игровой процесс - обрабатываем события, обновляем, отрисовываем..."""
 		while self.is_accessible_field():
-			self.check_points()
 			self.surface.fill(self.screen_color)
 			self.handle_events()
-			self.draw()
+			self.draw_cells()
+			self.draw_dots()
+			self.check_points()
 			pygame.display.update()
 			self.clock.tick(self.fps)
 
@@ -90,12 +93,42 @@ class Game(object):
 				return True
 		return False
 
+	def draw_polygon(self, points: list):
+		"""Рисуем полигон точек"""
+		color_p = points[0].get_color()
+		s = self.surface.convert_alpha()
+		s.fill([0, 0, 0, 0])
+		if self.get_player_by_color(color_p) == FIRST:
+			pygame.draw.polygon(s, self.rect_color_1, [[p.x * self.scale, p.y * self.scale] for p in points])
+		else:
+			pygame.draw.polygon(s, self.rect_color_2, [[p.x * self.scale, p.y * self.scale] for p in points])
+		self.surface.blit(s, (0, 0))
+
 	def check_points(self):
 		"""Проверяем, не окружены ли какие-нибудь точки"""
 		for i in range(len(self.field)):
 			for j in range(len(self.field[0])):
-				# Algorithm
-				pass
+				if self.field[i][j]:
+					current_player = self.get_player_by_color(self.field[i][j].get_color())
+					list_neighbours = [
+						self.field[i - 1][j], self.field[i][j + 1], self.field[i + 1][j], self.field[i][j - 1]]
+					count_enemies, count_friends = 0, 0
+					for point in list_neighbours:
+						if not point:
+							continue
+						if not point.get_readiness():
+							continue
+						if self.get_player_by_color(point.get_color()) != current_player:
+							count_enemies += 1
+						else:
+							count_friends += 1
+					if count_enemies == 4:
+						# Точка полностью окружена
+						self.field[i][j].set_useless()
+						self.draw_polygon(list_neighbours)
+					# print(
+					# 	f"Point ({i}, {j}); enemies: {count_enemies}; "
+					# 	f"friends: {count_friends}; is_ban: {self.field[i][j].get_readiness()}")
 
 	def get_player_by_color(self, color_: pygame.Color):
 		"""Возвращает номер игрока по цвету точки"""
@@ -114,9 +147,24 @@ class Dot(object):
 		self.scale = scale
 		self.is_active = True  # Не в плену ли точка (в противном случае флаг равен False)
 
-	def draw(self, surface):
+	def draw(self, surface: pygame.display):
 		"""Отрисовка"""
-		pygame.draw.circle(surface, self.color, (self.x * self.scale, self.y * self.scale), self.radius)
+		s = surface.convert_alpha()
+		s.fill([0, 0, 0, 0])
+		pygame.draw.circle(s, self.color, (self.x * self.scale, self.y * self.scale), self.radius)
+		return s
+
+	def get_color(self):
+		"""Возвращаем цвет точки"""
+		return self.color
+
+	def get_readiness(self):
+		"""Возвращает состояние точки (в плену, или нет)"""
+		return self.is_active
+
+	def set_useless(self):
+		"""Делает точку пленной"""
+		self.is_active = False
 
 
 if __name__ == '__main__':
