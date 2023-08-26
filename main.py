@@ -1,13 +1,19 @@
+
+
 import pygame
 import sys
 
+
 FIRST = 0
 SECOND = 1
+polygons = []
+useless_dots = []
 
-
+# Класс, отвечающий за основной игровой процесс
 class Game(object):
-	"""Класс, отвечающий за основной игровой процесс"""
+
 	def __init__(self, title: str, width: int, height: int, fps: int, size=(10, 10)):
+
 		# Инициализация звука, графики, часов, etc:
 		pygame.mixer.pre_init(44100, 16, 2, 4096)
 		pygame.init()
@@ -24,7 +30,7 @@ class Game(object):
 		self.dot_color_2 = pygame.Color((0, 0, 255, 182))  # Цвет точки другого игрока
 		self.rect_color_1 = pygame.Color((255, 0, 0, 91))  # Цвета прямоугольников из точек
 		self.rect_color_2 = pygame.Color((0, 0, 255, 91))
-		self.field = [[None for _ in range(size[0])] for _ in range(size[1])]  # Клеточное поле, собственно
+		self.field = [[None for _ in range(size[0] + 1)] for _ in range(size[1] + 1)]  # Клеточное поле, собственно
 		self.move = FIRST
 
 	def draw_cells(self):
@@ -42,20 +48,62 @@ class Game(object):
 			for j in range(len(self.field[0])):
 				if self.field[i][j]:
 					self.surface.blit(self.field[i][j].draw(self.surface), (0, 0))
+	
+	def point_in_borders(self, point, borders):
+		# bool result = false;
+		# int j = size - 1;
+		# for (int i = 0; i < size; i++) {
+		# 	if ( (p[i].Y < point.Y && p[j].Y >= point.Y || p[j].Y < point.Y && p[i].Y >= point.Y) &&
+		# 		(p[i].X + (point.Y - p[i].Y) / (p[j].Y - p[i].Y) * (p[j].X - p[i].X) < point.X) )
+		# 		result = !result;
+		# 	j = i;
+		# }
+		result = False
+		j = len(borders) - 1
+		for i in range(len(borders)):
+			if ((borders[i][1] < point[1] and borders[j][1] >= point[1] or borders[j][1] < point[1] and borders[i][1] >= point[1]) and \
+				(borders[i][0] + (point[1] - borders[i][1]) / (borders[j][1] - borders[i][1]) * (borders[j][0] - borders[i][0]) < point[0])):
+				result = not result
+			j = i
+		return result
 
+	# Обработка нажатия на кнопку мыши: преобразуются координаты, заполняется игровое поле
 	def handle_mouse_click(self, x: int, y: int):
-		"""Обработка нажатия на кнопку мыши: преобразуются координаты, заполняется игровое поле"""
-		x_true, y_true = x // self.scale, y // self.scale
-		if x_true == 0 or x_true == 19 or y_true == 0 or y_true == 19:
-			# Дополнительная проверка: не будем ставить в самый край листочка
-			return
-		if self.move == FIRST:
-			if not self.field[x_true][y_true]:
-				# Если клетка уже не занята!
-				self.field[x_true][y_true] = Dot(x_true, y_true, self.scale // 4, self.dot_color_1, self.scale)
-		else:
-			if not self.field[x_true][y_true]:
-				self.field[x_true][y_true] = Dot(x_true, y_true, self.scale // 4, self.dot_color_2, self.scale)
+
+		x, y = x / self.scale, y / self.scale
+		x = int(x // 1) if x % 1 < 0.5 else int(x // 1) + 1
+		y = int(y // 1) if y % 1 < 0.5 else int(y // 1) + 1
+
+		if 0 < x < self.size[0] and 0 < y < self.size[1] and not self.field[x][y]:
+			self.field[x][y] = Dot(x, y, self.scale // 4, self.dot_color_1 \
+			  if self.move == FIRST else self.dot_color_2, self.scale)
+			area, trace = self.search_point(x, y, [])
+			if area != 0:
+
+				global polygons
+
+				polygons += [list(map(lambda x: self.field[x[0]][x[1]], trace))]
+
+				for_removal = []
+				for i in range(len(polygons) - 1):
+					if polygons and all([polygons[i][j] in polygons[-1] for j in range(len(polygons[i]))]):
+						for_removal += [i]
+				
+				# Проверять всё поле не нужно, лишь максимально ограниченный прямоугольник.
+				# Но мне лень. Так что пусть останется в заметках, что можно определить
+				# максимальные границы и проверять только в них.
+
+				for i in range(len(self.field)):
+					for j in range(len(self.field[0])):
+						if self.field[i][j] and self.point_in_borders((i, j), trace) and \
+							self.field[i][j].get_color() != self.field[x][y].get_color():
+							self.field[i][j].set_useless()
+
+				shift = 0
+				for i in for_removal:
+					del polygons[i + shift]
+					shift -= 1
+				
 		self.change_move()
 
 	def change_move(self):
@@ -73,6 +121,8 @@ class Game(object):
 				sys.exit()
 			elif event.type == pygame.MOUSEBUTTONDOWN:
 				self.handle_mouse_click(*event.pos)
+				# self.check_points()
+		
 
 	def run(self):
 		"""Игровой процесс - обрабатываем события, обновляем, отрисовываем..."""
@@ -81,7 +131,8 @@ class Game(object):
 			self.handle_events()
 			self.draw_cells()
 			self.draw_dots()
-			self.check_points()
+			for polygon in polygons:
+				self.draw_polygon(polygon)
 			pygame.display.update()
 			self.clock.tick(self.fps)
 
@@ -104,31 +155,70 @@ class Game(object):
 			pygame.draw.polygon(s, self.rect_color_2, [[p.x * self.scale, p.y * self.scale] for p in points])
 		self.surface.blit(s, (0, 0))
 
+	# i, j are for the current dot; trace starts with the searched one.
+	def search_point(self, i, j, trace):
+
+		neighbours = [(i + shift_i, j + shift_j) for shift_i in range(-1, 2) \
+			for shift_j in range(-1, 2) if i + shift_i < self.size[0] \
+				and j + shift_j < self.size[1] \
+				and self.field[i + shift_i][j + shift_j] \
+				and not (shift_i == 0 and shift_j == 0) \
+				and self.field[i][j].get_color() == \
+					self.field[i + shift_i][j + shift_j].get_color()\
+				and (i + shift_i, j + shift_j) not in trace[1:] \
+				and self.field[i + shift_i][j + shift_j].get_readiness()]
+
+		trace, max_area, max_trace = trace + [(i, j)], 0, []
+		for neighbour in neighbours:
+			if (neighbour[0], neighbour[1]) == trace[0]:
+				area = 0.5 * abs(sum([trace[i][0] * trace[i + 1][1] \
+						for i in range(len(trace) - 1)]) + trace[-1][0] * trace[0][1] - \
+						sum([trace[i + 1][0] * trace[i][1] for i in range(len(trace) - 1)]) - \
+						trace[0][0] * trace[-1][1])
+				if area > max_area:
+					max_area = area
+					max_trace = trace
+			else:
+				area, new_trace = self.search_point(neighbour[0], neighbour[1], trace)
+				if area > max_area:
+					max_area = area
+					max_trace = new_trace
+
+		return (max_area, max_trace)
+
+
 	def check_points(self):
+
+		for i in range(self.size[0] + 1):
+			for j in range(self.size[1] + 1):
+				if not self.field[i][j]:
+					continue
+				
+
 		"""Проверяем, не окружены ли какие-нибудь точки"""
-		for i in range(len(self.field)):
-			for j in range(len(self.field[0])):
-				if self.field[i][j]:
-					current_player = self.get_player_by_color(self.field[i][j].get_color())
-					list_neighbours = [
-						self.field[i - 1][j], self.field[i][j + 1], self.field[i + 1][j], self.field[i][j - 1]]
-					count_enemies, count_friends = 0, 0
-					for point in list_neighbours:
-						if not point:
-							continue
-						if not point.get_readiness():
-							continue
-						if self.get_player_by_color(point.get_color()) != current_player:
-							count_enemies += 1
-						else:
-							count_friends += 1
-					if count_enemies == 4:
-						# Точка полностью окружена
-						self.field[i][j].set_useless()
-						self.draw_polygon(list_neighbours)
-					# print(
-					# 	f"Point ({i}, {j}); enemies: {count_enemies}; "
-					# 	f"friends: {count_friends}; is_ban: {self.field[i][j].get_readiness()}")
+		# for i in range(len(self.field)):
+		# 	for j in range(len(self.field[0])):
+		# 		if self.field[i][j]:
+		# 			current_player = self.get_player_by_color(self.field[i][j].get_color())
+		# 			list_neighbours = [
+		# 				self.field[i - 1][j], self.field[i][j + 1], self.field[i + 1][j], self.field[i][j - 1]]
+		# 			count_enemies, count_friends = 0, 0
+		# 			for point in list_neighbours:
+		# 				if not point:
+		# 					continue
+		# 				if not point.get_readiness():
+		# 					continue
+		# 				if self.get_player_by_color(point.get_color()) != current_player:
+		# 					count_enemies += 1
+		# 				else:
+		# 					count_friends += 1
+		# 			if count_enemies == 4:
+		# 				# Точка полностью окружена
+		# 				self.field[i][j].set_useless()
+		# 				self.draw_polygon(list_neighbours)
+		# 			# print(
+		# 			# 	f"Point ({i}, {j}); enemies: {count_enemies}; "
+		# 			# 	f"friends: {count_friends}; is_ban: {self.field[i][j].get_readiness()}")
 
 	def get_player_by_color(self, color_: pygame.Color):
 		"""Возвращает номер игрока по цвету точки"""
